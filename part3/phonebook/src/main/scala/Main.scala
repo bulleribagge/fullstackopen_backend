@@ -6,12 +6,15 @@ import akka.actor.ActorSystem
 import akka.http.scaladsl.Http
 import akka.stream.ActorMaterializer
 import PersonFormat._
+
+import scala.util.{Failure, Success}
 import akka.dispatch.affinity.RejectionHandler
 import akka.http.scaladsl.model.{ContentType, ContentTypes, HttpEntity, HttpResponse, StatusCodes}
 import akka.http.scaladsl.server.Directives._
 import akka.http.scaladsl.server.{ExceptionHandler, RejectionHandler, Route, ValidationRejection}
 
-import scala.concurrent.{ExecutionContextExecutor, Future}
+import scala.concurrent.duration.Duration
+import scala.concurrent.{Await, ExecutionContextExecutor, Future}
 import scala.io.StdIn
 
 object Main  {
@@ -43,6 +46,16 @@ object Main  {
     val route =
       handleExceptions(exceptionHandler) {
         handleRejections(rejectionHandler) {
+          pathEndOrSingleSlash{
+            println("trying to get static resource index.html...")
+            getFromResource("index.html")
+          } ~
+          pathPrefix("static"){
+            getFromResourceDirectory("static")
+          } ~
+          path("manifest.json") {
+            getFromResource("manifest.json")
+          } ~
           pathPrefix("api") {
             path("persons") {
               get {
@@ -81,12 +94,18 @@ object Main  {
         }
       }
 
-    val bindingFuture = Http().bindAndHandle(route, "localhost", 3001)
+    val bindingFuture = Http().bindAndHandle(route, "0.0.0.0", 3001)
 
-    println("Akka http server running on http://localhost:3001.\nPress RETURN to stop...")
-    StdIn.readLine()
-    bindingFuture
-      .flatMap(_.unbind())
-      .onComplete(_ => system.terminate())
+    bindingFuture.onComplete{
+      case Success(bound) =>
+        println(s"Akka http server running on http://${bound.localAddress.getHostString}:${bound.localAddress.getPort}.\nPress RETURN to stop...")
+      case Failure(e) => {
+        Console.err.println("Server could not start")
+        e.printStackTrace()
+        system.terminate()
+      }
+    }
+
+    Await.result(system.whenTerminated, Duration.Inf)
   }
 }
